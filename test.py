@@ -19,34 +19,6 @@ except ImportError:
     print("Please ensure main.py is in the same directory")
     sys.exit(1)
 
-# Default symbol lists as fallback
-DEFAULT_SYMBOLS_NSE = [
-    "RELIANCE", "TCS", "HDFCBANK", "INFY", "HINDUNILVR",
-    "ICICIBANK", "KOTAKBANK", "SBIN", "BAJFINANCE", "BHARTIARTL",
-    "ASIANPAINT", "ITC", "HCLTECH", "AXISBANK", "MARUTI",
-    "SUNPHARMA", "WIPRO", "ULTRACEMCO", "TITAN", "ADANIENT"
-]
-
-DEFAULT_SYMBOLS_SNP500 = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META",
-    "TSLA", "NVDA", "JPM", "V", "WMT",
-    "JNJ", "PG", "UNH", "HD", "DIS",
-    "PYPL", "NFLX", "ADBE", "CMCSA", "PEP"
-]
-
-ETF_STOCKS = [
-    'SPY', 'IWM', 'MDY', 'QQQ', 'VTV',
-    'VUG', 'RSP', 'DIA', 'XLF', 'XLK',
-    'XLE', 'XLV', 'XLI', 'XLY', 'XLP',
-    'XLU', 'XLB', 'XLRE', 'EWJ', 'EWG',
-    'EWZ', 'EWC', 'EWA', 'EWT', 'EWY',
-    'EWH', 'EWS', 'EWM', 'TLT', 'IEF',
-    'SHY', 'LQD', 'HYG', 'TIP', 'EMB',
-    'BNDX', 'GLD', 'SLV', 'USO', 'UNG',
-    'DBA', 'DBB', 'UUP', 'FXE', 'FXY',
-    'FXB', 'VNQ', 'RWX', 'PFF', 'VIG'
-]
-
 # Mapping of exchanges to TradingView regions and markets (for NSE and SNP 500)
 EXCHANGE_MAP = {
     "NSE": {"region": "india", "market": "nse"},
@@ -58,7 +30,7 @@ def get_symbols(exchange):
     try:
         # Directly return ETF_STOCKS for ETF exchange
         if exchange == "exchange":
-            return sorted(ETF_STOCKS)
+            return 
 
         if exchange not in EXCHANGE_MAP:
             raise ValueError(f"Exchange {exchange} not supported by TradingView API")
@@ -85,7 +57,7 @@ def get_symbols(exchange):
                 market_symbols = {item['d'][0] for item in data.get('data', []) if item['d'][0]}
                 symbols.update(market_symbols)
             symbols = sorted(list(symbols))
-            return symbols if symbols else DEFAULT_SYMBOLS_SNP500
+            return symbols 
         else:
             # Handle NSE
             region = EXCHANGE_MAP[exchange]["region"]
@@ -106,15 +78,9 @@ def get_symbols(exchange):
             response.raise_for_status()
             data = response.json()
             symbols = sorted(list(set(item['d'][0] for item in data.get('data', []) if item['d'][0])))
-            return symbols if symbols else DEFAULT_SYMBOLS_NSE
+            return symbols 
     except Exception as e:
         print(f"Error fetching symbols for {exchange}: {str(e)}")
-        if exchange == "SNP 500":
-            return DEFAULT_SYMBOLS_SNP500
-        elif exchange == "AMEX":
-            return ETF_STOCKS
-        else:
-            return DEFAULT_SYMBOLS_NSE
 
 class SymbolFetchThread(QThread):
     symbols_fetched = Signal(list)
@@ -887,19 +853,37 @@ class MainWindow(QWidget):
         self.export_button.clicked.connect(self.export_csv)
 
     def fetch_symbols(self, exchange):
-        if exchange in self.symbol_cache:
-            self.symbol_input.update_symbols(self.symbol_cache[exchange])
-            self.add_log(f"Loaded {len(self.symbol_cache[exchange])} symbols for {exchange} from cache", "#22c55e")
-            self.status_bar.showMessage(f"Loaded {len(self.symbol_cache[exchange])} symbols for {exchange}")
-            return
-
+        # Disable controls while loading
+        self.symbol_input.setDisabled(True)
+        self.exchange_combo.setDisabled(True)
         self.status_bar.showMessage(f"Fetching symbols for {exchange}...")
         self.add_log(f"Fetching symbols for {exchange}", "#60a5fa")
+
+        # Use QThread for symbol fetching
         self.symbol_thread = SymbolFetchThread(exchange)
-        self.symbol_thread.symbols_fetched.connect(self.on_symbols_fetched)
-        self.symbol_thread.error.connect(self.show_error)
+        self.symbol_thread.symbols_fetched.connect(self._on_symbols_fetched_threadsafe)
+        self.symbol_thread.error.connect(self._on_symbols_fetch_error_threadsafe)
         self.symbol_thread.finished.connect(self.symbol_thread.deleteLater)
         self.symbol_thread.start()
+
+    def _on_symbols_fetched_threadsafe(self, symbols):
+        exchange = self.exchange_combo.currentText()
+        self.symbol_input.setDisabled(False)
+        self.exchange_combo.setDisabled(False)
+        if not symbols:
+            self.show_error(f"No symbols found for {exchange}.")
+            self.status_bar.showMessage(f"No symbols found for {exchange}")
+            return
+        self.symbol_cache[exchange] = symbols
+        self.symbol_input.update_symbols(symbols)
+        self.add_log(f"Loaded {len(symbols)} symbols for {exchange}", "#22c55e")
+        self.status_bar.showMessage(f"Loaded {len(symbols)} symbols for {exchange}")
+
+    def _on_symbols_fetch_error_threadsafe(self, error_msg):
+        self.symbol_input.setDisabled(False)
+        self.exchange_combo.setDisabled(False)
+        self.show_error(error_msg)
+        self.status_bar.showMessage(error_msg)
 
     def on_symbols_fetched(self, symbols):
         self.symbol_cache[self.exchange_combo.currentText()] = symbols
@@ -923,13 +907,13 @@ class MainWindow(QWidget):
         if not symbols:
             self.show_error("Please select at least one symbol.")
             return
-                
+
         exchange = self.exchange_combo.currentText().strip().upper() or "NSE"
         interval_str = self.interval_input.currentText()
-        
+
         from_date = self.from_date.date().toPython()
         to_date = self.to_date.date().toPython()
-        
+
         if from_date > to_date:
             self.show_error("From date must be earlier than To date.")
             return
@@ -947,32 +931,65 @@ class MainWindow(QWidget):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.fetch_button.setEnabled(False)
+        self.symbol_input.setDisabled(True)
+        self.exchange_combo.setDisabled(True)
         self.fetch_button.setText("Fetching...")
         self.status_bar.showMessage(f"Fetching data for {', '.join(symbols)}")
         self.add_log(f"Starting fetch for {len(symbols)} symbols from {exchange}", "#60a5fa")
 
-        try:
-            tv = TvDatafeed()
-            self.df_dict = {}
-            self.thread = DataFetchThread(tv, symbols, exchange, interval_enum, n_bars)
-            self.thread.data_fetched.connect(self.on_data_fetched)
-            self.thread.error.connect(self.show_error)
-            self.thread.progress.connect(self.progress_bar.setValue)
-            self.thread.log_message.connect(self.add_log)
-            self.thread.finished.connect(self.reset_fetch_button)
-            self.thread.start()
-        except Exception as e:
-            self.show_error(f"Failed to initialize data fetcher: {str(e)}")
-            self.reset_fetch_button()
+        def fetch():
+            try:
+                tv = TvDatafeed()
+                self.df_dict = {}
+                thread = DataFetchThread(tv, symbols, exchange, interval_enum, n_bars)
+                result = {}
+                error = None
+                finished = threading.Event()
+
+                def on_data_fetched(df_dict):
+                    nonlocal result
+                    result = df_dict
+                    finished.set()
+
+                def on_error(msg):
+                    nonlocal error
+                    error = msg
+                    finished.set()
+
+                thread.data_fetched.connect(on_data_fetched)
+                thread.error.connect(on_error)
+                thread.progress.connect(self.progress_bar.setValue)
+                thread.log_message.connect(self.add_log)
+                thread.finished.connect(self.reset_fetch_button)
+                thread.start()
+                finished.wait()
+                if error:
+                    raise Exception(error)
+                return result
+            except Exception as e:
+                return e
+
+        def on_done(result):
+            self.symbol_input.setDisabled(False)
+            self.exchange_combo.setDisabled(False)
+            if isinstance(result, Exception):
+                self.show_error(f"Failed to fetch data: {str(result)}")
+                self.reset_fetch_button()
+                return
+            self.on_data_fetched(result)
+
+        import threading
+        threading.Thread(target=lambda: on_done(fetch()), daemon=True).start()
 
     def on_data_fetched(self, df_dict):
         self.df_dict = df_dict
         total_records = sum(len(df) for df in df_dict.values())
         selected_symbols = self.symbol_input.get_selected_symbols()
-        
+
         if not df_dict:
             self.show_error("No data returned. Please check symbols, exchange, or connection.")
             self.export_button.setEnabled(False)
+            self.status_bar.showMessage("No data returned.")
             return
 
         if len(df_dict) < len(selected_symbols):
@@ -980,16 +997,20 @@ class MainWindow(QWidget):
             self.show_error(f"Failed to fetch data for {', '.join(failed_symbols)} after retries.")
             self.export_button.setEnabled(False)
             self.add_log(f"Fetch incomplete: {len(df_dict)}/{len(selected_symbols)} symbols successful", "#ef4444")
+            self.status_bar.showMessage(f"Fetch incomplete: {len(df_dict)}/{len(selected_symbols)} symbols successful")
         else:
             self.show_info("Data Fetched Successfully", 
                           f"Successfully fetched {total_records} records for {len(df_dict)} symbols")
             self.export_button.setEnabled(True)
+            self.status_bar.showMessage(f"Fetched {total_records} records for {len(df_dict)} symbols.")
             self.add_log(f"Fetch complete: {total_records} records for {len(df_dict)} symbols", "#22c55e")
 
     def reset_fetch_button(self):
         self.progress_bar.setVisible(False)
         self.fetch_button.setEnabled(True)
         self.fetch_button.setText("Fetch Data")
+        self.symbol_input.setDisabled(False)
+        self.exchange_combo.setDisabled(False)
         if self.df_dict:
             total_records = sum(len(df) for df in self.df_dict.values())
             self.status_bar.showMessage(f"Data fetched: {total_records} records • Ready for export")
@@ -1052,6 +1073,7 @@ class MainWindow(QWidget):
 
     def show_error(self, message):
         self.add_log(message, "#ef4444")
+        self.status_bar.showMessage(message)
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Critical)
         msg.setWindowTitle("Error")

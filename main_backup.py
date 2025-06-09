@@ -192,20 +192,22 @@ class TvDatafeed:
             return pd.DataFrame()
 
     @staticmethod
-    def __format_symbol(symbol: str, exchange: str, contract: int = None) -> str:
+    def __format_symbol(symbol: str, exchange: str = None, contract: int = None) -> str:
+        # Only use the symbol as-is, do not prepend exchange
+        # If user provides EXCHANGE:SYMBOL, keep it, else just use symbol
         if ":" in symbol:
             return symbol
         elif contract is None:
-            return f"{exchange}:{symbol}"
+            return symbol
         elif isinstance(contract, int):
-            return f"{exchange}:{symbol}{contract}!"
+            return f"{symbol}{contract}!"
         else:
             raise ValueError("Not a valid contract")
 
     def get_hist(
         self,
         symbol: str,
-        exchange: str,
+        exchange: str,  # Only used for folder naming, not for data fetch
         interval: Interval = Interval.in_daily,
         n_bars: int = 10,
         fut_contract: int = None,
@@ -226,10 +228,10 @@ class TvDatafeed:
         Returns:
             pd.DataFrame: DataFrame with OHLCV columns
         """
-        print(f"Fetching historical data for {symbol} on {exchange} with interval {interval.value} and n_bars {n_bars}")
-        formatted_symbol = self.__format_symbol(symbol, exchange, fut_contract)
+        print(f"Fetching historical data for {symbol} (exchange: {exchange}) with interval {interval.value} and n_bars {n_bars}")
+        # Only use the symbol for data fetch, not the exchange
+        formatted_symbol = self.__format_symbol(symbol, None, fut_contract)
         logger.info(f"Fetching data for symbol: {formatted_symbol}")
-        
         interval_value = interval.value
         session = self.__generate_session()
         chart_session = self.__generate_chart_session()
@@ -317,7 +319,7 @@ class TvDatafeed:
     def get_multiple_hist(
         self,
         symbols: List[str],
-        exchange: str,  # Fixed type annotation
+        exchange: str,  # Only used for folder naming, not for data fetch
         interval: Interval = Interval.in_daily,
         n_bars: int = 10,
         fut_contract: int = None,
@@ -325,23 +327,20 @@ class TvDatafeed:
     ) -> Dict[str, pd.DataFrame]:
         """Get historical data for multiple symbols sequentially (avoiding threading issues)"""
         results = {}
-        
         for symbol in symbols:
             logger.info(f"Processing symbol: {symbol}")
             df = self.get_hist(
                 symbol=symbol,
-                exchange=exchange,
+                exchange=exchange,  # Only used for folder naming, not for data fetch
                 interval=interval,
                 n_bars=n_bars,
                 fut_contract=fut_contract,
                 extended_session=extended_session
             )
             results[symbol] = df
-            
             # Add delay between requests to avoid rate limiting
             if len(symbols) > 1:
                 time.sleep(2)
-        
         return results
 
     def search_symbol(self, text: str, exchange: str = '', proxy: Dict[str, str] = None) -> List[Dict]:
